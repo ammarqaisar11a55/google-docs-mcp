@@ -1,0 +1,61 @@
+{
+  "name": "google-docs-mcp",
+  "version": "1.0.0",
+  "description": "A production-ready Model Context Protocol (MCP) server for Google Docs: create, read, edit, format and search Google Docs from any MCP client.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "google-docs-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "google-docs",
+    "google-drive",
+    "ai",
+    "llm"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "auth": "tsx src/index.ts auth",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run tests/integration",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@googleapis/docs": "^13.0.0",
+    "@googleapis/drive": "^25.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "google-auth-library": "^11.0.2",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^22.20.2",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.0"
+  }
+}

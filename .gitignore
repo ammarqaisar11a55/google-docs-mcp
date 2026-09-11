@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Secrets and OAuth tokens — never commit these
+.env
+.env.*
+!.env.example
+tokens.json
+token.json
+credentials.json
+client_secret*.json
+
+.DS_Store
+.vscode/
+.idea/

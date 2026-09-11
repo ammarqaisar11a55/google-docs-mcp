@@ -1,0 +1,133 @@
+#!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { GoogleAuthManager } from './auth/google-auth.js';
+import { TokenManager } from './auth/token-manager.js';
+import { loadConfig } from './config/config.js';
+import { createDependencies, createServer, SERVER_NAME, SERVER_VERSION } from './server.js';
+import { toAppError } from './utils/errors.js';
+import { logger, setLogLevel } from './utils/logger.js';
+import { openBrowser } from './utils/open-browser.js';
+
+const USAGE = `${SERVER_NAME} ${SERVER_VERSION}
+
+Usage:
+  google-docs-mcp            Start the MCP server on stdio (used by MCP clients)
+  google-docs-mcp auth       Sign in with Google and store OAuth tokens
+  google-docs-mcp status     Show the current Google sign-in status
+  google-docs-mcp logout     Revoke access and delete stored tokens
+  google-docs-mcp --help     Show this help
+  google-docs-mcp --version  Show the version
+
+Configuration is read from environment variables (see .env.example).`;
+
+/** Loads `.env` from the working directory and from the package root, without overriding env. */
+function loadEnvFiles(): void {
+  const candidates = new Set([
+    path.resolve(process.cwd(), '.env'),
+    fileURLToPath(new URL('../.env', import.meta.url)),
+  ]);
+  for (const file of candidates) {
+    if (existsSync(file)) process.loadEnvFile(file);
+  }
+}
+
+/** CLI output goes to stderr so stdout stays clean (and never carries secrets). */
+function print(message: string): void {
+  process.stderr.write(`${message}\n`);
+}
+
+function createAuthManager(): GoogleAuthManager {
+  const config = loadConfig();
+  setLogLevel(config.logLevel);
+  return new GoogleAuthManager(config.google, new TokenManager(config.tokenPath));
+}
+
+async function runAuth(): Promise<void> {
+  const auth = createAuthManager();
+  const session = await auth.startAuthorization();
+  print('Open this URL in your browser to sign in with Google:\n');
+  print(`  ${session.authUrl}\n`);
+  if (openBrowser(session.authUrl)) print('(A browser window was opened automatically.)');
+  print('Waiting for Google to redirect back (up to 5 minutes)...');
+  await session.completion;
+  const status = await auth.getStatus();
+  print(
+    status.authenticated
+      ? 'Success: Google Docs MCP is authorized. You can now start the server from your MCP client.'
+      : `Signed in, but some permissions are missing: ${status.missingScopes.join(', ')}`,
+  );
+}
+
+async function runStatus(): Promise<void> {
+  const status = await createAuthManager().getStatus();
+  print(JSON.stringify(status, null, 2));
+}
+
+async function runLogout(): Promise<void> {
+  const { revoked } = await createAuthManager().signOut();
+  print(revoked ? 'Signed out and revoked access at Google.' : 'Local tokens deleted.');
+}
+
+function runServer(): void {
+  const config = loadConfig();
+  setLogLevel(config.logLevel);
+  const deps = createDependencies(config);
+  const handle = serveStdio(() => createServer(deps), {
+    onerror: (error) => {
+      logger.error('MCP transport error.', { error });
+    },
+  });
+  logger.info(`${SERVER_NAME} ${SERVER_VERSION} running on stdio.`);
+
+  const shutdown = () => {
+    void handle.close().finally(() => process.exit(0));
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+}
+
+async function main(): Promise<void> {
+  loadEnvFiles();
+  const command = process.argv[2];
+  switch (command) {
+    case undefined:
+    case 'serve':
+      runServer();
+      return;
+    case 'auth':
+      await runAuth();
+      return;
+    case 'status':
+      await runStatus();
+      return;
+    case 'logout':
+      await runLogout();
+      return;
+    case '--version':
+    case '-v':
+      print(SERVER_VERSION);
+      return;
+    case '--help':
+    case '-h':
+      print(USAGE);
+      return;
+    default:
+      print(`Unknown command: ${command}\n\n${USAGE}`);
+      process.exitCode = 1;
+  }
+}
+
+main().then(
+  () => {
+    // `auth` leaves no handles open once finished; exit explicitly in case a browser child lingers.
+    if (process.argv[2] === 'auth') process.exit(0);
+  },
+  (err: unknown) => {
+    const error = toAppError(err);
+    print(`Error [${error.code}]: ${error.message}`);
+    process.exit(1);
+  },
+);
