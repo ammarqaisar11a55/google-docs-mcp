@@ -11,9 +11,17 @@ export function registerDocumentTools(register: RegisterTool, { documents }: Ser
     name: 'create_document',
     title: 'Create Google Doc',
     description:
-      'Create a new, empty Google Docs document with the given title in the user’s Google Drive. Returns the new documentId, title and URL. To add content afterwards use append_text.',
+      'Create a new Google Docs document with the given title in the user’s Google Drive, optionally filled with initial plain text. Returns the new documentId, title and URL. Headings, bold text and lists are not created from the text: apply them afterwards with set_paragraph_style, format_text or create_bulleted_list (use find_text or get_document for the indexes). To add more content later use append_text.',
     inputSchema: z.strictObject({
       title: titleSchema.describe('Title of the new document, e.g. "FYP Proposal".'),
+      initialContent: z
+        .string()
+        .min(1)
+        .max(1_000_000)
+        .optional()
+        .describe(
+          'Optional plain text to put in the new document. Use "\\n" to separate paragraphs.',
+        ),
     }),
     annotations: {
       readOnlyHint: false,
@@ -21,7 +29,7 @@ export function registerDocumentTools(register: RegisterTool, { documents }: Ser
       idempotentHint: false,
       openWorldHint: true,
     },
-    handler: async ({ title }) => documents.create(title),
+    handler: async ({ title, initialContent }) => documents.create(title, initialContent),
   });
 
   register({

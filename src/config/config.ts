@@ -30,11 +30,30 @@ export interface AppConfig {
   logLevel: LogLevel;
 }
 
+/**
+ * MCP hosts such as Claude Desktop substitute `${user_config.*}` placeholders in the server
+ * environment. A placeholder that reaches the process unresolved means "not configured".
+ */
+const UNRESOLVED_PLACEHOLDER = /^\$\{[^}]*\}$/;
+
 const blankToUndefined = (value: unknown): unknown => {
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
-  return trimmed === '' ? undefined : trimmed;
+  return trimmed === '' || UNRESOLVED_PLACEHOLDER.test(trimmed) ? undefined : trimmed;
 };
+
+const TRUE_VALUES = new Set(['true', '1', 'yes']);
+const FALSE_VALUES = new Set(['false', '0', 'no']);
+
+const booleanFlag = z
+  .preprocess(
+    (value) => {
+      const normalized = blankToUndefined(value);
+      return typeof normalized === 'string' ? normalized.toLowerCase() : normalized;
+    },
+    z.enum(['true', 'false', '1', '0', 'yes', 'no']).optional(),
+  )
+  .transform((value) => (value === undefined ? undefined : TRUE_VALUES.has(value)));
 
 const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.preprocess(blankToUndefined, z.string().optional()),
@@ -42,6 +61,8 @@ const envSchema = z.object({
   GOOGLE_REDIRECT_URI: z.preprocess(blankToUndefined, z.string().optional()),
   GOOGLE_TOKEN_PATH: z.preprocess(blankToUndefined, z.string().optional()),
   GOOGLE_DRIVE_SCOPE: z.preprocess(blankToUndefined, z.enum(['drive', 'drive.file']).optional()),
+  GOOGLE_DRIVE_FILE_ONLY: booleanFlag,
+  GOOGLE_DOCS_MCP_DEBUG: booleanFlag,
   LOG_LEVEL: z.preprocess(blankToUndefined, z.enum(LOG_LEVELS).optional()),
 });
 
@@ -79,6 +100,15 @@ function resolveTokenPath(raw: string | undefined, env: NodeJS.ProcessEnv): stri
   return path.resolve(expanded);
 }
 
+/**
+ * Whether `.env` files may be loaded. The Claude Desktop extension disables this, because all
+ * of its settings come from the host and a stray `.env` file must not change them.
+ */
+export function isDotenvEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = blankToUndefined(env.GOOGLE_DOCS_MCP_LOAD_DOTENV);
+  return !(typeof value === 'string' && FALSE_VALUES.has(value.toLowerCase()));
+}
+
 /** Loads and validates configuration from environment variables. Never includes values in errors. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
@@ -91,7 +121,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const values = parsed.data;
   const redirectUri = values.GOOGLE_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
   validateRedirectUri(redirectUri);
-  const driveScope: DriveScopeMode = values.GOOGLE_DRIVE_SCOPE ?? 'drive';
+  const driveScope: DriveScopeMode =
+    values.GOOGLE_DRIVE_SCOPE ?? (values.GOOGLE_DRIVE_FILE_ONLY ? 'drive.file' : 'drive');
 
   return {
     google: {
@@ -102,6 +133,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       scopes: [DOCS_SCOPE, DRIVE_SCOPES[driveScope]],
     },
     tokenPath: resolveTokenPath(values.GOOGLE_TOKEN_PATH, env),
-    logLevel: values.LOG_LEVEL ?? 'info',
+    logLevel: values.LOG_LEVEL ?? (values.GOOGLE_DOCS_MCP_DEBUG ? 'debug' : 'info'),
   };
 }

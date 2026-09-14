@@ -1,7 +1,9 @@
 node_modules/
 dist/
+build/
 coverage/
 *.log
+*.mcpb
 
 # Secrets and OAuth tokens — never commit these
 .env
@@ -9,8 +11,10 @@ coverage/
 !.env.example
 tokens.json
 token.json
+tokens/
 credentials.json
 client_secret*.json
+*.secret
 
 .DS_Store
 .vscode/

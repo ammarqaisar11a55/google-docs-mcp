@@ -12,6 +12,8 @@ const storedTokensSchema = z.object({
   scope: z.string().nullish(),
   token_type: z.string().nullish(),
   id_token: z.string().nullish(),
+  /** OAuth client ID the tokens were issued to; tokens are unusable with any other client. */
+  client_id: z.string().nullish(),
 });
 
 export type StoredTokens = z.infer<typeof storedTokensSchema>;

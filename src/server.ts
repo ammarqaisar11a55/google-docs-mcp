@@ -15,7 +15,8 @@ import { registerDocumentTools } from './tools/documents/index.js';
 import { registerFormattingTools } from './tools/formatting/index.js';
 import { registerSearchTools } from './tools/search/index.js';
 import { registerStructureTools } from './tools/structure/index.js';
-import { ErrorCode } from './utils/errors.js';
+import { UnavailableAuthService } from './auth/unavailable-auth.js';
+import { type AppError, ErrorCode } from './utils/errors.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json') as { version: string };
@@ -73,6 +74,16 @@ export function createServer(deps: ServerDependencies): McpServer {
 /** Wires the real Google implementations from configuration. */
 export function createDependencies(config: AppConfig): ServerDependencies {
   const auth = new GoogleAuthManager(config.google, new TokenManager(config.tokenPath));
+  const services = createServices(new GoogleDocsClient(auth), new GoogleDriveClient(auth));
+  return { auth, services };
+}
+
+/**
+ * Wiring used when the configuration is invalid: all tools stay registered, and every Google
+ * operation fails with the configuration error so the user learns exactly what to fix.
+ */
+export function createUnconfiguredDependencies(error: AppError): ServerDependencies {
+  const auth = new UnavailableAuthService(error);
   const services = createServices(new GoogleDocsClient(auth), new GoogleDriveClient(auth));
   return { auth, services };
 }

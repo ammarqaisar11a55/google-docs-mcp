@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/', 'coverage/', 'node_modules/'] },
+  { ignores: ['dist/', 'build/', 'coverage/', 'node_modules/'] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
@@ -32,6 +32,14 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/unbound-method': 'off',
+      '@typescript-eslint/no-unnecessary-type-parameters': 'off',
+    },
+  },
+  {
+    // Build scripts print progress to the console.
+    files: ['scripts/**/*.ts'],
+    rules: {
+      'no-console': 'off',
       '@typescript-eslint/no-unnecessary-type-parameters': 'off',
     },
   },

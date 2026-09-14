@@ -1,0 +1,47 @@
+name: Release
+
+# Runs only when a version tag such as v1.1.0 is pushed. Ordinary pushes never publish anything.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the .mcpb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check that the tag matches package.json and manifest.json
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "v$PACKAGE_VERSION" != "$GITHUB_REF_NAME" ] || [ "$MANIFEST_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME, package.json $PACKAGE_VERSION and manifest.json $MANIFEST_VERSION must match."
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run package
+      - run: npm run package:check
+
+      - name: Upload google-docs-mcp.mcpb to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" build/google-docs-mcp.mcpb --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" build/google-docs-mcp.mcpb \
+              --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
