@@ -5,8 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { GoogleAuthManager } from './auth/google-auth.js';
 import { TokenManager } from './auth/token-manager.js';
-import { loadConfig } from './config/config.js';
-import { createDependencies, createServer, SERVER_NAME, SERVER_VERSION } from './server.js';
+import { isDotenvEnabled, loadConfig } from './config/config.js';
+import {
+  createDependencies,
+  createServer,
+  createUnconfiguredDependencies,
+  SERVER_NAME,
+  SERVER_VERSION,
+  type ServerDependencies,
+} from './server.js';
 import { toAppError } from './utils/errors.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import { openBrowser } from './utils/open-browser.js';
@@ -23,8 +30,12 @@ Usage:
 
 Configuration is read from environment variables (see .env.example).`;
 
-/** Loads `.env` from the working directory and from the package root, without overriding env. */
+/**
+ * Loads `.env` from the working directory and from the package root, without overriding
+ * variables that are already set. Disabled with GOOGLE_DOCS_MCP_LOAD_DOTENV=false.
+ */
 function loadEnvFiles(): void {
+  if (!isDotenvEnabled()) return;
   const candidates = new Set([
     path.resolve(process.cwd(), '.env'),
     fileURLToPath(new URL('../.env', import.meta.url)),
@@ -71,18 +82,41 @@ async function runLogout(): Promise<void> {
   print(revoked ? 'Signed out and revoked access at Google.' : 'Local tokens deleted.');
 }
 
+function createServerDependencies(): ServerDependencies {
+  try {
+    const config = loadConfig();
+    setLogLevel(config.logLevel);
+    logger.info('Configuration loaded.', {
+      driveScope: config.google.driveScope,
+      oauthClientConfigured: Boolean(config.google.clientId && config.google.clientSecret),
+      logLevel: config.logLevel,
+    });
+    return createDependencies(config);
+  } catch (err) {
+    const error = toAppError(err);
+    // Keep serving: when a server exits, hosts such as Claude Desktop only show a generic
+    // failure, whereas tool results can tell the user exactly which setting is wrong.
+    logger.error('Invalid configuration; tools will report the problem until it is fixed.', {
+      errorCode: error.code,
+      reason: error.message,
+    });
+    return createUnconfiguredDependencies(error);
+  }
+}
+
 function runServer(): void {
-  const config = loadConfig();
-  setLogLevel(config.logLevel);
-  const deps = createDependencies(config);
+  const deps = createServerDependencies();
   const handle = serveStdio(() => createServer(deps), {
     onerror: (error) => {
       logger.error('MCP transport error.', { error });
     },
   });
-  logger.info(`${SERVER_NAME} ${SERVER_VERSION} running on stdio.`);
+  logger.info(
+    `${SERVER_NAME} ${SERVER_VERSION} running on stdio (Node.js ${process.version}, ${process.platform}).`,
+  );
 
-  const shutdown = () => {
+  const shutdown = (signal: NodeJS.Signals) => {
+    logger.info(`Received ${signal}; shutting down.`);
     void handle.close().finally(() => process.exit(0));
   };
   process.once('SIGINT', shutdown);

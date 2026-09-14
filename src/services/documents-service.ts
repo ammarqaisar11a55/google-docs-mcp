@@ -2,9 +2,10 @@ import type { DocsClient } from '../google/docs-client.js';
 import { parseDocument, type ParsedBlock } from '../google/document-parser.js';
 import type { DriveClient, DriveFile } from '../google/drive-client.js';
 import type { DocumentPage, DocumentReference } from '../types/documents.js';
-import { AppError, ErrorCode } from '../utils/errors.js';
+import { AppError, ErrorCode, toAppError } from '../utils/errors.js';
 import { documentUrl } from '../utils/url.js';
 import { normalizeDocumentId } from '../utils/validation.js';
+import { sanitizeInsertText } from './edit-helpers.js';
 import {
   buildDocumentQuery,
   DOCUMENT_FILE_FIELDS,
@@ -90,16 +91,42 @@ export class DocumentsService {
     private readonly drive: DriveClient,
   ) {}
 
-  async create(title: string): Promise<DocumentReference> {
+  /**
+   * Creates a document, optionally with initial plain-text content. The content is validated
+   * before anything is created, so invalid content never leaves an empty document behind.
+   */
+  async create(
+    title: string,
+    initialContent?: string,
+  ): Promise<DocumentReference & { insertedLength?: number }> {
+    const content = initialContent === undefined ? undefined : sanitizeInsertText(initialContent);
     const document = await this.docs.createDocument(title);
     if (!document.documentId) {
       throw new AppError(ErrorCode.GOOGLE_API_ERROR, 'Google did not return a document ID.');
     }
-    return {
+    const reference: DocumentReference = {
       documentId: document.documentId,
       title: document.title ?? title,
       url: documentUrl(document.documentId),
     };
+    if (content === undefined) return reference;
+
+    try {
+      // A new document's body is a single empty paragraph, so index 1 is its start.
+      await this.docs.batchUpdate(
+        reference.documentId,
+        [{ insertText: { text: content, location: { index: 1 } } }],
+        { targetRevisionId: document.revisionId ?? undefined },
+      );
+    } catch (err) {
+      const cause = toAppError(err);
+      throw new AppError(
+        cause.code,
+        `The document was created, but adding the initial content failed: ${cause.message} The empty document is at ${reference.url}; add the content with append_text.`,
+        { details: { ...reference }, cause: err },
+      );
+    }
+    return { ...reference, insertedLength: content.length };
   }
 
   async get(documentIdOrUrl: string, options: GetDocumentOptions = {}): Promise<DocumentContent> {

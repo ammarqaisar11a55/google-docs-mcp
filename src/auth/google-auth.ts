@@ -26,6 +26,8 @@ export interface AuthStatus {
   hasRefreshToken: boolean;
   accessTokenExpiresAt: string | null;
   authorizationPending: boolean;
+  /** Set when the server started with an invalid configuration; explains what to fix. */
+  configurationError?: string;
 }
 
 export interface AuthorizationSession {
@@ -172,6 +174,17 @@ export class GoogleAuthManager implements AuthService {
     return this.tokens;
   }
 
+  /**
+   * Tokens are bound to the OAuth client that issued them. Tokens recorded for another client
+   * (for example after changing the client ID in the extension settings) cannot be used.
+   * Tokens stored before the client was recorded are accepted.
+   */
+  private belongsToAnotherClient(tokens: StoredTokens | null | undefined): boolean {
+    return Boolean(
+      tokens?.client_id && this.config.clientId && tokens.client_id !== this.config.clientId,
+    );
+  }
+
   /** Drops cached credentials so the next call re-reads the token store. */
   invalidate(): void {
     this.tokens = undefined;
@@ -183,6 +196,12 @@ export class GoogleAuthManager implements AuthService {
     const tokens = await this.loadTokens();
     if (!tokens || (!tokens.access_token && !tokens.refresh_token)) {
       throw new AppError(ErrorCode.NOT_AUTHENTICATED, `Not signed in to Google. ${REAUTH_HINT}`);
+    }
+    if (this.belongsToAnotherClient(tokens)) {
+      throw new AppError(
+        ErrorCode.NOT_AUTHENTICATED,
+        `The stored Google authorization belongs to a different OAuth client than the one now configured. ${REAUTH_HINT}`,
+      );
     }
     const missingScopes = findMissingScopes(tokens.scope, this.config.scopes);
     if (missingScopes.length > 0) {
@@ -199,7 +218,7 @@ export class GoogleAuthManager implements AuthService {
       );
     }
     if (this.appliedTokens !== tokens) {
-      const { scope, ...credentials } = tokens;
+      const { scope, client_id: _clientId, ...credentials } = tokens;
       client.setCredentials({ ...credentials, ...(scope ? { scope } : {}) });
       this.appliedTokens = tokens;
     }
@@ -222,7 +241,11 @@ export class GoogleAuthManager implements AuthService {
     const hasRefreshToken = Boolean(tokens?.refresh_token);
     const usable = Boolean(tokens && (hasRefreshToken || !isAccessTokenExpired(tokens)));
     return {
-      authenticated: this.credentialsConfigured && usable && missingScopes.length === 0,
+      authenticated:
+        this.credentialsConfigured &&
+        usable &&
+        missingScopes.length === 0 &&
+        !this.belongsToAnotherClient(tokens),
       credentialsConfigured: this.credentialsConfigured,
       requiredScopes: [...this.config.scopes],
       grantedScopes,
@@ -350,7 +373,12 @@ export class GoogleAuthManager implements AuthService {
         codeVerifier: flow.codeVerifier,
         redirect_uri: this.config.redirectUri,
       });
-      const merged = mergeTokens(await this.store.load(), toStoredTokens(tokens));
+      const existing = await this.store.load();
+      // Nothing from another OAuth client's tokens (such as its refresh token) may be carried over.
+      const merged = mergeTokens(this.belongsToAnotherClient(existing) ? null : existing, {
+        ...toStoredTokens(tokens),
+        client_id: this.config.clientId ?? null,
+      });
       await this.store.save(merged);
       this.tokens = merged;
       this.appliedTokens = undefined;

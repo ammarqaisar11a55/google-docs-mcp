@@ -71,13 +71,21 @@ export function createToolRegistrar(
         annotations: { title: definition.title, ...definition.annotations },
       },
       async (args) => {
+        const startedAt = Date.now();
+        // Arguments are never logged: they can contain document content.
+        logger.debug(`Tool "${definition.name}" called.`);
         try {
           // The SDK has already validated `args` against `inputSchema` (defaults applied).
-          return successResult(await definition.handler(args as z.output<Schema>));
+          const result = successResult(await definition.handler(args as z.output<Schema>));
+          logger.debug(`Tool "${definition.name}" succeeded.`, {
+            durationMs: Date.now() - startedAt,
+          });
+          return result;
         } catch (err) {
           const appError = toAppError(err);
           logger.warn(`Tool "${definition.name}" failed.`, {
-            code: appError.code,
+            errorCode: appError.code,
+            durationMs: Date.now() - startedAt,
             cause: appError.cause,
           });
           options.onError?.(appError, definition.name);

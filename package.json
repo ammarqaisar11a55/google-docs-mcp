@@ -1,8 +1,15 @@
 {
   "name": "google-docs-mcp",
-  "version": "1.0.0",
-  "description": "A production-ready Model Context Protocol (MCP) server for Google Docs: create, read, edit, format and search Google Docs from any MCP client.",
+  "version": "1.1.0",
+  "description": "A production-ready Model Context Protocol (MCP) server and Claude Desktop extension for Google Docs: create, read, edit, format and search Google Docs from any MCP client.",
   "license": "MIT",
+  "author": "Muhammad Ammar Qaisar (https://github.com/ammarqaisar11a55)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ammarqaisar11a55/google-docs-mcp.git"
+  },
+  "homepage": "https://github.com/ammarqaisar11a55/google-docs-mcp#readme",
+  "bugs": "https://github.com/ammarqaisar11a55/google-docs-mcp/issues",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -19,11 +26,11 @@
   },
   "keywords": [
     "mcp",
+    "mcpb",
     "model-context-protocol",
+    "claude-desktop",
     "google-docs",
-    "google-drive",
-    "ai",
-    "llm"
+    "google-drive"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -38,6 +45,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run tests/integration",
+    "validate:manifest": "mcpb validate manifest.json",
+    "package": "tsx scripts/package-mcpb.ts",
+    "package:check": "tsx scripts/verify-mcpb.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -48,6 +58,7 @@
     "zod": "^4.6.2"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^22.20.2",
@@ -57,5 +68,8 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.0",
     "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "tmp": "^0.2.7"
   }
 }

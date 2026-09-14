@@ -1,252 +1,303 @@
 # Google Docs MCP
 
-A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that lets MCP-compatible AI clients (Claude Desktop, Claude Code, VS Code, Cursor and others) work with your Google Docs. It can create, read, edit, format, organize and search documents through the official Google Docs API and Google Drive API.
+Let Claude work with your Google Docs. Google Docs MCP is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that creates, reads, edits, formats and searches Google Docs through the official Google Docs and Google Drive APIs.
 
-You sign in once with Google OAuth 2.0. After that, you can say things like _"Create a document called FYP Proposal and add the following content…"_, and the AI client calls this server's tools to do it. You don't have to open the Google Docs UI.
+You can use it in two ways:
 
-It is written in strict TypeScript on Node.js and uses the official MCP TypeScript SDK (v2) over the stdio transport.
+- **Claude Desktop extension (`.mcpb`).** Install one file, fill in two settings, and sign in with Google. You don't need Node.js, npm or any JSON configuration.
+- **Standalone MCP server.** Run it with Node.js from any MCP client, such as Claude Code, VS Code or Cursor.
+
+> Google Docs MCP is an independent open-source project. It is not affiliated with or endorsed by Google.
 
 ---
 
+## Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation (Claude Desktop)](#installation-claude-desktop)
+- [Setup](#setup)
+- [Available Tools](#available-tools)
+- [Usage Examples](#usage-examples)
+- [Permissions](#permissions)
+- [Troubleshooting](#troubleshooting)
+- [Updating and Uninstalling](#updating-and-uninstalling)
+- [Standalone MCP Server](#standalone-mcp-server)
+- [Development](#development)
+- [Architecture](#architecture)
+- [Security](#security)
+- [License](#license)
+
 ## Features
 
-- **Google OAuth 2.0 sign-in.** Uses the authorization-code flow with PKCE (S256), a CSRF `state` check and a loopback redirect. Access tokens refresh automatically. Tokens are stored locally in a file only you can read, and re-authentication is guided when needed.
-- **Document management.** Create, read, list, copy and delete documents. Delete moves a document to the Drive trash; nothing is ever permanently deleted.
-- **Content editing.** Append, insert at an index, find-and-replace, and delete a range. A delete can include an optional `expectedText` safety check.
-- **Formatting.** Bold, italic, underline, strikethrough, font size and family, text and highlight colors, named paragraph styles (Title, Subtitle, Heading 1–6), and alignment.
-- **Structure.** Page breaks, tables, hyperlinks, and bulleted, numbered or checkbox lists.
-- **Search.** Find Docs by file name and/or full-text content (`search_documents`), or get exact indexes of a phrase inside a document (`find_text`).
-- **MCP resources.** `google-docs://document/{documentId}` exposes a document's plain text.
-- **MCP prompts.** `summarize_document`, `rewrite_document`, `format_document`, `create_meeting_notes`.
-- **Predictable results.** Every tool returns JSON `{ "success": true, "data": … }` or `{ "success": false, "error": { "code", "message", "retryable" } }`. Error codes are stable.
-- **Friendly inputs.** Every tool accepts either a document ID or a full Google Docs URL.
-- **Secure by default.** Least-privilege scope option, strict input validation, redaction of secrets in logs and errors, and index validation before any write.
-
-## Architecture
-
-```text
-MCP Client (Claude Desktop, Claude Code, VS Code, Cursor, ...)
-    │
-    │  MCP (JSON-RPC over stdio)
-    ▼
-MCP Server  ── McpServer from @modelcontextprotocol/server v2, served with serveStdio
-    │
-    ├── Authentication        src/auth
-    │     ├── GoogleAuthManager   OAuth 2.0 + PKCE, loopback redirect, token refresh
-    │     └── TokenManager        tokens.json (0600, atomic writes)
-    │
-    ├── MCP Tools / Resources / Prompts   src/tools, src/resources, src/prompts
-    │     │   (zod-validated input, uniform { success, data | error } results)
-    │     ▼
-    │   Services (business logic)         src/services
-    │     │   index validation, Drive query building, document parsing
-    │     ▼
-    └── Google API Clients                src/google (DocsClient, DriveClient)
-             │
-       ┌─────┴─────┐
-       ▼           ▼
- Google Docs   Google Drive
-```
-
-- **Tools** only declare schemas and descriptions, then delegate to services.
-- **Services** hold the business logic and depend on small `DocsClient` / `DriveClient` interfaces. This lets unit tests replace Google entirely.
-- **Google API clients** are thin wrappers around `@googleapis/docs` and `@googleapis/drive`. They get an authorized OAuth2 client from the auth layer for every call.
-- **stdout is reserved for the MCP protocol.** All logs go to stderr as JSON lines.
+- **Documents:** create a document (optionally with initial text), read it, list your documents, copy one, or move one to the Drive trash.
+- **Content:** append text, insert text at a position, replace every occurrence of a phrase, or delete a range. Deletion can first check that the range still contains the text you expect.
+- **Formatting:** bold, italic, underline, strikethrough, font family and size, text and highlight colors, Title, Subtitle and Heading 1–6 styles, and alignment.
+- **Structure:** page breaks, tables, links, and bulleted, numbered or checkbox lists.
+- **Search:** find documents by name or content, and find a phrase inside a document with its exact position.
+- **Sign-in:** Google OAuth 2.0 with PKCE. Access tokens refresh automatically, and you can sign in or out by asking Claude.
+- **Resource and prompts:** a `google-docs://document/{documentId}` resource with a document's text, plus prompts to summarize, rewrite and format a document or create meeting notes.
 
 ## Requirements
 
-- **Node.js 22.12 or newer** (`node --version`).
-- **A Google Cloud project** (free) in the [Google Cloud Console](https://console.cloud.google.com/).
-- **Google Docs API** enabled in that project.
-- **Google Drive API** enabled in that project.
-- **An OAuth 2.0 client ID of type "Desktop app"**, with its client secret. See [Google OAuth Setup](#google-oauth-setup).
-- An MCP-compatible client.
+- **Claude Desktop** with extension support (macOS or Windows).
+- **A Google account.**
+- **A Google Cloud OAuth client.** It's free and takes about 10 minutes to create. See [Setup](#setup).
 
-## Installation
+The extension runs on the Node.js runtime built into Claude Desktop and requires Node.js 22 or newer.
+
+**Why do I need my own OAuth client?** Full Google Drive access is a _restricted_ Google scope. An app that shares one OAuth client with the public needs a paid Google security assessment. With your own client, your data only flows between your computer and Google, and you stay in control of the app that accesses your account.
+
+## Installation (Claude Desktop)
+
+1. Download `google-docs-mcp.mcpb` from the [latest release](https://github.com/ammarqaisar11a55/google-docs-mcp/releases/latest), or [build it yourself](#development).
+2. Open **Claude Desktop → Settings → Extensions**.
+3. Install the file. Either drag `google-docs-mcp.mcpb` into the Extensions window, or use **Advanced settings → Install Extension…** and choose the file. Double-clicking the file also opens the installer. Labels can differ slightly between Claude Desktop versions.
+4. Review the extension details and click **Install**.
+5. Claude Desktop asks for the extension settings. Complete [Setup](#setup) first to get your Client ID and Client secret.
+
+## Setup
+
+### 1. Create a Google OAuth client (once)
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create a project, for example `google-docs-claude`.
+2. Go to **APIs & Services → Library** and enable the **Google Docs API** and the **Google Drive API**.
+3. Go to **APIs & Services → OAuth consent screen** (Google Auth Platform) and click **Get started**:
+   - **Branding:** enter an app name and your email address.
+   - **Audience:** choose **External**, and under **Test users** add the Google account you'll use.
+   - **Data access** (optional): add the scopes listed under [Permissions](#permissions).
+4. Go to **Clients → Create client** and choose **Application type: Desktop app**. A _Desktop app_ client is required.
+5. Copy the **Client ID** and the **Client secret**.
+
+### 2. Configure the extension
+
+In **Settings → Extensions → Google Docs for Claude**, open the configuration and fill in:
+
+| Setting                                      | Required | Description                                                                                                                         |
+| -------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Google OAuth Client ID                       | yes      | Ends in `.apps.googleusercontent.com`.                                                                                              |
+| Google OAuth Client secret                   | yes      | Stored securely by Claude Desktop as a sensitive value.                                                                             |
+| Limit Drive access to this extension's files | no       | Least privilege. Drive operations (list, search, copy, trash) only see documents created or opened by this extension. Default: off. |
+| Sign-in callback port                        | no       | Local port on `127.0.0.1` that receives the sign-in redirect. Default: `53682`. Change it only if another program uses the port.    |
+| Debug logging                                | no       | Detailed diagnostic logs, with secrets always redacted. Default: off.                                                               |
+
+Make sure the extension is **enabled**.
+
+### 3. Sign in with Google
+
+In a new chat, ask Claude:
+
+```text
+Sign in to Google.
+```
+
+Claude calls the `authenticate` tool, which opens a Google sign-in page in your browser and also shows the link in the chat. Choose your account and approve access.
+
+While your OAuth app is in **Testing** status, Google shows a "Google hasn't verified this app" warning. That's expected for your own app: click **Advanced → Go to _app name_**. Afterwards, ask Claude to check the connection:
+
+```text
+Check my Google sign-in status.
+```
+
+To disconnect at any time, ask Claude to **sign out of Google**. That revokes access at Google and deletes the stored tokens.
+
+## Available Tools
+
+Every `documentId` parameter also accepts a full Google Docs URL.
+
+| Tool                   | Description                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `get_auth_status`      | Check whether the extension is signed in to Google with the required permissions. Never returns tokens.               |
+| `authenticate`         | Start Google sign-in and return the link to approve access.                                                           |
+| `sign_out`             | Revoke Google access and delete the locally stored tokens.                                                            |
+| `create_document`      | Create a new Google Doc, optionally with initial text (`title`, `initialContent?`).                                   |
+| `get_document`         | Read a document's text and structure outline, including exact positions (`includeStructure?`, `maxTextLength?`).      |
+| `list_documents`       | List your Google Docs, most recently modified first (`limit?`, `pageToken?`, `search?`).                              |
+| `delete_document`      | Move a document to the Google Drive **trash**, where it can be restored for 30 days. Never deletes permanently.       |
+| `copy_document`        | Copy a document under a new title (`newTitle`).                                                                       |
+| `append_text`          | Append text to the end of a document (`text`, `startNewParagraph?`).                                                  |
+| `insert_text`          | Insert text at a position (`index`, `text`).                                                                          |
+| `replace_text`         | Replace every occurrence of a phrase (`searchText`, `replacementText`, `matchCase?`).                                 |
+| `delete_text`          | Delete a range (`startIndex`, `endIndex`), optionally only if it still contains `expectedText`.                       |
+| `format_text`          | Apply `bold`, `italic`, `underline`, `strikethrough`, `fontSize`, `fontFamily`, `foregroundColor`, `backgroundColor`. |
+| `set_paragraph_style`  | Apply `NORMAL_TEXT`, `TITLE`, `SUBTITLE` or `HEADING_1` … `HEADING_6`.                                                |
+| `set_alignment`        | Align paragraphs: `START`, `CENTER`, `END` or `JUSTIFIED`.                                                            |
+| `insert_page_break`    | Insert a page break at a position.                                                                                    |
+| `insert_table`         | Insert an empty table (`rows`, `columns`).                                                                            |
+| `insert_link`          | Turn existing text into an `http`, `https` or `mailto` link.                                                          |
+| `create_bulleted_list` | Turn paragraphs into a `bulleted`, `numbered` or `checkbox` list.                                                     |
+| `search_documents`     | Search Google Docs by name, content or both (`query`, `searchIn?`, `limit?`, `pageToken?`).                           |
+| `find_text`            | Find a phrase in a document and return the exact start and end position of each match.                                |
+
+Every tool returns `{ "success": true, "data": … }` or `{ "success": false, "error": { "code", "message", "retryable" } }`, and failures also set MCP's `isError` flag. The error codes are `NOT_AUTHENTICATED`, `AUTH_EXPIRED`, `INVALID_CREDENTIALS`, `CONFIG_ERROR`, `INVALID_DOCUMENT_ID`, `DOCUMENT_NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_INDEX`, `INVALID_ARGUMENT`, `INVALID_REQUEST`, `RATE_LIMITED`, `NETWORK_ERROR`, `GOOGLE_API_ERROR` and `INTERNAL_ERROR`.
+
+**About positions.** Editing tools use Google Docs indexes: the body starts at index 1, and every insert or delete shifts the text after it. Claude gets exact positions from `get_document` or `find_text`, and applies several edits from the end of the document backwards.
+
+**About search.** Name search matches words in a document's name that _start with_ your query. Content search uses Google Drive's full-text index, which matches words rather than arbitrary fragments and may take a while to include recent edits. Results only include Google Docs that aren't in the trash.
+
+## Usage Examples
+
+```text
+Create a Google Doc called "Project Notes" with a short introduction to our Q4 goals.
+```
+
+```text
+Find my document named "Semester Plan".
+```
+
+```text
+Add this content to the end of my "Semester Plan" doc: Week 10 — final project presentations.
+```
+
+```text
+Search my Google Docs for anything that mentions "budget".
+```
+
+```text
+In "Project Notes", make "Q4 Goals" a Heading 1 and turn the lines under it into a bulleted list.
+```
+
+```text
+Replace every "2025" with "2026" in my "Roadmap" document.
+```
+
+```text
+Make every mention of "deadline" in "Semester Plan" bold and red.
+```
+
+```text
+Summarize my "Meeting Notes 12 Sept" document.
+```
+
+```text
+Make a copy of "Proposal Template" called "FYP Proposal".
+```
+
+```text
+Move the "Old Draft" document to the trash.
+```
+
+## Permissions
+
+The extension requests exactly two Google OAuth scopes.
+
+| Scope                                                  | When                            | Why it is needed                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `https://www.googleapis.com/auth/documents`            | always                          | Create documents and read, edit and format their content through the Google Docs API. It applies to Google Docs you can access, which lets you point Claude at any document by URL or ID.                                                                                                                       |
+| `https://www.googleapis.com/auth/drive`                | default                         | Drive operations on **all** your existing Docs: list and search (`list_documents`, `search_documents`), copy (`copy_document`), move to trash (`delete_document`), and check that a file is a Google Doc before changing it. Narrower Drive scopes can't list or search documents this extension didn't create. |
+| `https://www.googleapis.com/auth/drive.file` (instead) | "Limit Drive access" setting on | Least privilege. The same Drive operations, but only for documents created or opened by this extension.                                                                                                                                                                                                         |
+
+Other scopes were ruled out:
+
+- `drive.readonly` and `drive.metadata.readonly` can't copy or trash documents.
+- `drive.file` alone can't find the documents you already have, so it's offered as an option rather than the default.
+
+After changing the "Limit Drive access" setting, sign in again. The extension reports missing permissions until you do.
+
+## Troubleshooting
+
+| Problem                                                         | Solution                                                                                                                                                                                                                              |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude says it isn't signed in (`NOT_AUTHENTICATED`)            | Ask Claude to "sign in to Google" and approve access. This is also needed after changing the OAuth client or the Drive access setting.                                                                                                |
+| `AUTH_EXPIRED` about once a week                                | Google expires sign-ins after 7 days while the OAuth app's publishing status is **Testing**. Sign in again, or set the app to **In production** under Google Auth Platform → Audience. Personal use doesn't need Google verification. |
+| `Error 403: access_denied` in the browser                       | Your Google account isn't a **test user** of the OAuth app. Add it under Google Auth Platform → Audience → Test users.                                                                                                                |
+| `Error 400: redirect_uri_mismatch`                              | The OAuth client isn't of type **Desktop app**. Create a Desktop app client and update the settings.                                                                                                                                  |
+| `INVALID_CREDENTIALS`                                           | The Client ID or Client secret is wrong or missing. Re-enter both in the extension settings.                                                                                                                                          |
+| `CONFIG_ERROR: ... API is not enabled`                          | Enable both the **Google Docs API** and the **Google Drive API** in the project that owns your OAuth client, wait a minute, and retry.                                                                                                |
+| `CONFIG_ERROR: The OAuth callback port ... is already in use`   | Change **Sign-in callback port** in the extension settings, for example to `53999`. Nothing needs to change in Google Cloud.                                                                                                          |
+| The sign-in link doesn't work                                   | Open it on the same computer that runs Claude Desktop, within 5 minutes. Ask Claude to sign in again for a fresh link.                                                                                                                |
+| Documents are missing from lists or searches                    | With "Limit Drive access" on, only documents created or opened by this extension are visible. Turn it off and sign in again. Recently edited documents can also take a moment to show up in content search.                           |
+| `INVALID_INDEX`                                                 | The document changed since its positions were read. Ask Claude to re-read the document and try again.                                                                                                                                 |
+| `RATE_LIMITED`                                                  | Google API quota exceeded. Wait a minute and retry.                                                                                                                                                                                   |
+| The extension fails to start or reports Node.js as incompatible | The extension needs Node.js 22 or newer. Update Claude Desktop, or install Node.js 22+ and let Claude Desktop use it instead of its built-in runtime (Settings → Extensions → Advanced settings, where available).                    |
+| Where are the logs?                                             | Claude Desktop keeps MCP server logs in its logs folder: `~/Library/Logs/Claude` on macOS, `%APPDATA%\Claude\logs` on Windows. Turn on **Debug logging** for more detail. Tokens and secrets are always redacted.                     |
+
+## Updating and Uninstalling
+
+**Updating.** Download the new `google-docs-mcp.mcpb` and install it the same way; Claude Desktop replaces the existing version. Your Google sign-in is stored outside the extension, so you normally don't need to sign in again.
+
+**Uninstalling.**
+
+1. Optional but recommended: ask Claude to **sign out of Google**. This revokes access and deletes the token file.
+2. In **Settings → Extensions**, open **Google Docs for Claude** and choose **Uninstall**.
+3. If you didn't sign out first, delete the token file (`~/.config/google-docs-mcp/tokens.json` on macOS and Linux, `%APPDATA%\google-docs-mcp\tokens.json` on Windows) and remove the app's access at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+
+---
+
+## Standalone MCP Server
+
+The same server runs without Claude Desktop, from any MCP client that supports stdio servers.
+
+### Requirements
+
+- Node.js 22.12 or newer.
+- The Google OAuth client from [Setup](#1-create-a-google-oauth-client-once).
+
+### Install and build
 
 ```bash
 git clone https://github.com/ammarqaisar11a55/google-docs-mcp.git
 cd google-docs-mcp
-npm install
+npm ci
 npm run build
 ```
 
-The build writes the compiled server to `dist/index.js`. MCP clients need the absolute path to this file.
-
-## Configuration
-
-The server is configured with environment variables. Copy the example file and fill in your OAuth client:
+### Configure
 
 ```bash
 cp .env.example .env
 ```
 
-```env
-GOOGLE_CLIENT_ID=123456789012-abc123.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOCSPX-your-client-secret
-GOOGLE_REDIRECT_URI=http://127.0.0.1:53682/oauth2callback
-# GOOGLE_TOKEN_PATH=
-# GOOGLE_DRIVE_SCOPE=drive
-# LOG_LEVEL=info
-```
+Edit `.env`:
 
-| Variable                        | Required | Default                                 | Description                                                                                                                                                                                                                                                                                                |
-| ------------------------------- | -------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID`              | yes      | –                                       | OAuth client ID of your **Desktop app** client.                                                                                                                                                                                                                                                            |
-| `GOOGLE_CLIENT_SECRET`          | yes      | –                                       | OAuth client secret of that client.                                                                                                                                                                                                                                                                        |
-| `GOOGLE_REDIRECT_URI`           | no       | `http://127.0.0.1:53682/oauth2callback` | Loopback address where the one-time sign-in redirect is received. It must be `http://` on `127.0.0.1`, `localhost` or `[::1]`, with an explicit port. Desktop-app clients accept any loopback port, so you don't need to register it in Google Cloud. Change the port if 53682 is in use.                  |
-| `GOOGLE_TOKEN_PATH`             | no       | `~/.config/google-docs-mcp/tokens.json` | Where OAuth tokens are stored. `~` is expanded, and relative paths resolve against the working directory, so prefer absolute paths. Default on Linux/macOS: `$XDG_CONFIG_HOME/google-docs-mcp/tokens.json` (falling back to `~/.config/...`). Default on Windows: `%APPDATA%\google-docs-mcp\tokens.json`. |
-| `GOOGLE_DRIVE_SCOPE`            | no       | `drive`                                 | Drive permission level. `drive` gives full Drive access and is needed to list, search, copy and trash **all** your existing Docs. `drive.file` is least privilege: Drive operations only see files created or opened by this app. See [Security](#security).                                               |
-| `LOG_LEVEL`                     | no       | `info`                                  | `error`, `warn`, `info` or `debug`. Logs go to stderr, and secrets are always redacted.                                                                                                                                                                                                                    |
-| `RUN_GOOGLE_INTEGRATION_TESTS`  | no       | –                                       | Tests only. Set to `true` to enable the optional real-account integration tests.                                                                                                                                                                                                                           |
-| `GOOGLE_INTEGRATION_TOKEN_PATH` | no       | –                                       | Tests only. Token file of the Google test account used by the integration tests.                                                                                                                                                                                                                           |
+| Variable                      | Default                                 | Description                                                                                              |
+| ----------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`            | –                                       | OAuth client ID (Desktop app). Required.                                                                 |
+| `GOOGLE_CLIENT_SECRET`        | –                                       | OAuth client secret. Required.                                                                           |
+| `GOOGLE_REDIRECT_URI`         | `http://127.0.0.1:53682/oauth2callback` | Loopback URL (`127.0.0.1`, `localhost` or `[::1]`) with an explicit port.                                |
+| `GOOGLE_TOKEN_PATH`           | `~/.config/google-docs-mcp/tokens.json` | Token file location. On Windows the default is `%APPDATA%\google-docs-mcp\tokens.json`.                  |
+| `GOOGLE_DRIVE_SCOPE`          | `drive`                                 | `drive` or `drive.file`. See [Permissions](#permissions).                                                |
+| `GOOGLE_DRIVE_FILE_ONLY`      | `false`                                 | Boolean form of the same setting (`true` means `drive.file`). `GOOGLE_DRIVE_SCOPE` wins if both are set. |
+| `LOG_LEVEL`                   | `info`                                  | `error`, `warn`, `info` or `debug`. Logs go to stderr.                                                   |
+| `GOOGLE_DOCS_MCP_DEBUG`       | `false`                                 | `true` is a shortcut for `LOG_LEVEL=debug`.                                                              |
+| `GOOGLE_DOCS_MCP_LOAD_DOTENV` | `true`                                  | Set to `false` to ignore `.env` files. The Claude Desktop extension does this.                           |
 
-Notes:
+`.env` is read from the working directory and from the package root, and never overrides variables already set in the environment.
 
-- The server reads a `.env` file from the **current working directory** and from the **package root** (the folder that contains `dist/`). Values from `.env` **never override** variables already set in the real environment, for example variables set in your MCP client's `env` block. This means you can keep your credentials in `<repo>/.env` and leave them out of client configs.
-- Blank values (`GOOGLE_DRIVE_SCOPE=`) count as unset.
-- Invalid values (for example `LOG_LEVEL=verbose`, or a non-loopback redirect URI) stop startup with a `CONFIG_ERROR`. Error messages never include the configured values.
-- `.env`, `tokens.json` and `client_secret*.json` are git-ignored. Never commit them.
-
-## Google OAuth Setup
-
-You only do this once. The console labels below match the current Google Cloud Console, where the OAuth consent screen now lives under **Google Auth Platform**.
-
-1. **Create a project.**
-   Open the [Google Cloud Console](https://console.cloud.google.com/), click the project picker in the top bar, and choose **New project**. Give it a name (for example `google-docs-mcp`), click **Create**, and make sure the new project is selected.
-
-2. **Enable the APIs.**
-   Go to **APIs & Services → Library**. Search for **Google Docs API** and click **Enable**. Then search for **Google Drive API** and click **Enable**. Both are required.
-
-3. **Configure the OAuth consent screen (Google Auth Platform).**
-   Go to **APIs & Services → OAuth consent screen** (this opens **Google Auth Platform**) and click **Get started** if prompted.
-   - **Branding:** enter an app name (for example `Google Docs MCP`), a user support email and a developer contact email, then save.
-   - **Audience:** choose **External**. This is the usual choice for a personal Gmail account; Google Workspace users may choose **Internal**. While the app's publishing status is **Testing**, open **Test users**, click **Add users**, and **add your own Google account**. Only test users can sign in.
-   - **Data access:** click **Add or remove scopes** and add:
-     - `https://www.googleapis.com/auth/documents`
-     - `https://www.googleapis.com/auth/drive`, or `https://www.googleapis.com/auth/drive.file` if you set `GOOGLE_DRIVE_SCOPE=drive.file`
-
-     Then save.
-
-4. **Create the OAuth client ID.**
-   Go to **Google Auth Platform → Clients** (or **APIs & Services → Credentials → Create credentials → OAuth client ID**). Click **Create client**, set **Application type** to **Desktop app**, give it a name, and click **Create**.
-
-5. **Copy the credentials.**
-   Copy the **Client ID** and **Client secret** into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in your `.env`. Store the secret safely right away: the console may not show it again, and you may have to create a new secret.
-
-Good to know:
-
-- **"Google hasn't verified this app."** While your app is unverified, Google shows this warning during sign-in. Because it is your own app, click **Advanced → Go to _App name_ (unsafe)** and continue. Personal use does not need verification.
-- **Refresh tokens expire after 7 days in Testing status.** If the publishing status is **Testing** and you request the scopes above, Google expires the refresh token after 7 days. After that, tools fail with `AUTH_EXPIRED` and you need to sign in again. To avoid weekly re-authentication, switch the app to **In production** under **Audience**. Unverified production apps still show the warning screen and are limited in the number of users, which is fine for personal use.
-- A **Desktop app** client is required. A **Web application** client needs every redirect URI registered exactly and causes `redirect_uri_mismatch`.
-
-## Authentication
-
-Sign in once. The server stores a refresh token and renews access tokens automatically.
-
-**From a terminal** (recommended the first time):
+### Sign in and run
 
 ```bash
-npm run auth                # runs the TypeScript sources through tsx
-# or, after `npm run build`:
 node dist/index.js auth
 ```
 
-This prints a Google sign-in URL and tries to open it in your browser. Approve access, and the browser redirects to the local loopback address, which completes the sign-in. The link is valid for 5 minutes.
-
-Other commands:
-
 ```bash
-node dist/index.js status   # show sign-in status, granted scopes and token expiry (never prints tokens)
-node dist/index.js logout   # revoke access at Google and delete the local token file
-node dist/index.js --help
+node dist/index.js status
 ```
 
-If you install the package globally or with `npm link`, the same commands are available as `google-docs-mcp auth`, `google-docs-mcp status` and `google-docs-mcp logout`.
+Other commands: `node dist/index.js logout` signs out, `npm start` runs the server, and `npm run dev` runs it with automatic restarts. You can also sign in from the AI client with the `authenticate` tool.
 
-**From the AI client:** ask your assistant to sign in to Google. It calls the `authenticate` tool, which returns an `authUrl` (and tries to open it in your browser). Open the URL on **the same computer that runs the server**, approve access, then have the assistant call `get_auth_status` to confirm. The `sign_out` tool revokes access and deletes the stored tokens.
+### Connect an MCP client
 
-**Where tokens are stored:** in `GOOGLE_TOKEN_PATH`, which defaults to `~/.config/google-docs-mcp/tokens.json` (or `%APPDATA%\google-docs-mcp\tokens.json` on Windows). The file is created with mode `0600` inside a `0700` directory and written atomically. If you change `GOOGLE_DRIVE_SCOPE` from `drive.file` to `drive`, sign in again: tools report `NOT_AUTHENTICATED` with `details.missingScopes` until you do.
-
-## Running
+**Claude Code**
 
 ```bash
-# Development: run the TypeScript sources with automatic restarts
-npm run dev
-
-# Production: compile once, then run the compiled server
-npm run build
-npm start          # = node dist/index.js
+claude mcp add google-docs -- node /absolute/path/to/google-docs-mcp/dist/index.js
 ```
 
-The server speaks MCP over **stdio**. It is normally started by your MCP client (see below), not by hand. When you run it manually it waits silently for an MCP client on stdin, and its logs appear on stderr. To explore the tools interactively, you can use the MCP Inspector:
-
-```bash
-npx @modelcontextprotocol/inspector node dist/index.js
-```
-
-## MCP Client Configuration
-
-Replace `/abs/path/to/google-docs-mcp` with the absolute path of your clone. On Windows, use forward slashes or escaped backslashes in JSON (`C:/Users/you/google-docs-mcp/dist/index.js`).
-
-If your credentials are in `<repo>/.env`, you can leave out the `env` blocks below: the server loads `.env` from its package root.
-
-### Claude Desktop
-
-Edit `claude_desktop_config.json`. Open it from **Settings → Developer → Edit Config**. It is located at:
-
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+**Claude Desktop (manual configuration instead of the extension), Cursor and other clients** that use the `mcpServers` format:
 
 ```json
 {
   "mcpServers": {
     "google-docs": {
       "command": "node",
-      "args": ["/abs/path/to/google-docs-mcp/dist/index.js"],
-      "env": {
-        "GOOGLE_CLIENT_ID": "123456789012-abc123.apps.googleusercontent.com",
-        "GOOGLE_CLIENT_SECRET": "GOCSPX-your-client-secret"
-      }
+      "args": ["/absolute/path/to/google-docs-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-Restart Claude Desktop after saving.
-
-### Claude Code
-
-```bash
-claude mcp add google-docs \
-  -e GOOGLE_CLIENT_ID=123456789012-abc123.apps.googleusercontent.com \
-  -e GOOGLE_CLIENT_SECRET=GOCSPX-your-client-secret \
-  -- node /abs/path/to/google-docs-mcp/dist/index.js
-```
-
-Add `--scope project` to share the server with your team through a project-level `.mcp.json`, or `--scope user` to make it available in all your projects. You can also write `.mcp.json` in the project root by hand:
-
-```json
-{
-  "mcpServers": {
-    "google-docs": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/abs/path/to/google-docs-mcp/dist/index.js"],
-      "env": {
-        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
-        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}"
-      }
-    }
-  }
-}
-```
-
-`${VAR}` placeholders are expanded from your shell environment, so secrets stay out of the committed file. Check the server with `claude mcp list` or `/mcp` inside Claude Code.
-
-### VS Code (GitHub Copilot agent mode)
-
-Create `.vscode/mcp.json` in your workspace. VS Code uses a top-level **`servers`** key:
+**VS Code** (`.vscode/mcp.json`):
 
 ```json
 {
@@ -254,262 +305,106 @@ Create `.vscode/mcp.json` in your workspace. VS Code uses a top-level **`servers
     "google-docs": {
       "type": "stdio",
       "command": "node",
-      "args": ["/abs/path/to/google-docs-mcp/dist/index.js"],
-      "envFile": "/abs/path/to/google-docs-mcp/.env"
+      "args": ["/absolute/path/to/google-docs-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-You can use `"env": { ... }` instead of `envFile`, or keep secrets out of the file with VS Code `inputs` (`"type": "promptString", "password": true`).
-
-### Cursor
-
-Edit `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
-
-```json
-{
-  "mcpServers": {
-    "google-docs": {
-      "command": "node",
-      "args": ["/abs/path/to/google-docs-mcp/dist/index.js"],
-      "env": {
-        "GOOGLE_CLIENT_ID": "123456789012-abc123.apps.googleusercontent.com",
-        "GOOGLE_CLIENT_SECRET": "GOCSPX-your-client-secret"
-      }
-    }
-  }
-}
-```
-
-Any other client that supports stdio MCP servers works the same way: run `node /abs/path/to/google-docs-mcp/dist/index.js`.
-
-## Available Tools
-
-Every `documentId` parameter also accepts a full Google Docs URL (`https://docs.google.com/document/d/<ID>/edit`). Optional parameters are marked with `?`.
-
-| Tool                   | Description                                                                                                                | Key parameters                                                                                                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_auth_status`      | Report whether the server is signed in and has the required scopes. Never returns tokens.                                  | –                                                                                                                                                              |
-| `authenticate`         | Start the Google OAuth sign-in and return the `authUrl` to open. Does nothing if already signed in, unless `force` is set. | `force?`, `openBrowser?`                                                                                                                                       |
-| `sign_out`             | Revoke access at Google and delete the stored tokens.                                                                      | –                                                                                                                                                              |
-| `create_document`      | Create a new, empty Google Doc and return its ID, title and URL.                                                           | `title`                                                                                                                                                        |
-| `get_document`         | Read a document: title, URL, plain text, `bodyEndIndex` and a structure outline with exact indexes.                        | `documentId`, `includeStructure?`, `maxTextLength?`                                                                                                            |
-| `list_documents`       | List Google Docs, most recently modified first, optionally filtered by name.                                               | `limit?` (1–100, default 20), `pageToken?`, `search?`                                                                                                          |
-| `delete_document`      | Move a document to the Drive **trash** (restorable for 30 days). Only Google Docs files are accepted.                      | `documentId`                                                                                                                                                   |
-| `copy_document`        | Copy a document, with its content and formatting, under a new title.                                                       | `documentId`, `newTitle`                                                                                                                                       |
-| `append_text`          | Append text to the end of a document.                                                                                      | `documentId`, `text`, `startNewParagraph?`                                                                                                                     |
-| `insert_text`          | Insert text at a specific index.                                                                                           | `documentId`, `index`, `text`                                                                                                                                  |
-| `replace_text`         | Replace every occurrence of a text in the document.                                                                        | `documentId`, `searchText`, `replacementText`, `matchCase?`                                                                                                    |
-| `delete_text`          | Delete the text in `[startIndex, endIndex)`, optionally only if it matches `expectedText`.                                 | `documentId`, `startIndex`, `endIndex`, `expectedText?`                                                                                                        |
-| `format_text`          | Apply character formatting to a range. Only the attributes you specify are changed.                                        | `documentId`, `startIndex`, `endIndex`, `bold?`, `italic?`, `underline?`, `strikethrough?`, `fontSize?`, `fontFamily?`, `foregroundColor?`, `backgroundColor?` |
-| `set_paragraph_style`  | Apply a named paragraph style to the paragraphs in a range.                                                                | `documentId`, `startIndex`, `endIndex`, `style`: `NORMAL_TEXT` \| `TITLE` \| `SUBTITLE` \| `HEADING_1` … `HEADING_6`                                           |
-| `set_alignment`        | Set paragraph alignment for a range.                                                                                       | `documentId`, `startIndex`, `endIndex`, `alignment`: `START` \| `CENTER` \| `END` \| `JUSTIFIED`                                                               |
-| `insert_page_break`    | Insert a page break at an index.                                                                                           | `documentId`, `index`                                                                                                                                          |
-| `insert_table`         | Insert an empty table at an index.                                                                                         | `documentId`, `index`, `rows`, `columns`                                                                                                                       |
-| `insert_link`          | Turn a range of existing text into a hyperlink (`http`, `https` or `mailto` only).                                         | `documentId`, `startIndex`, `endIndex`, `url`                                                                                                                  |
-| `create_bulleted_list` | Turn the paragraphs in a range into a list.                                                                                | `documentId`, `startIndex`, `endIndex`, `listType?`: `bulleted` \| `numbered` \| `checkbox`                                                                    |
-| `search_documents`     | Search Google Docs by file name, full-text content, or both.                                                               | `query`, `limit?`, `searchIn?`: `name` \| `content` \| `both`, `pageToken?`                                                                                    |
-| `find_text`            | Find a phrase inside a document and return the exact start/end index of each match.                                        | `documentId`, `text`, `matchCase?`, `maxResults?`                                                                                                              |
-
-Colors (`foregroundColor`, `backgroundColor`) are hex strings such as `#1A73E8` or `#fff`.
-
-### Results and errors
-
-Successful calls return:
-
-```json
-{
-  "success": true,
-  "data": {
-    "documentId": "1AbC…",
-    "title": "FYP Proposal",
-    "url": "https://docs.google.com/document/d/1AbC…/edit"
-  }
-}
-```
-
-Failed calls set the MCP `isError` flag and return:
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "DOCUMENT_NOT_FOUND",
-    "message": "The Google Docs document could not be found or you do not have access to it.",
-    "retryable": false
-  }
-}
-```
-
-Some errors include a `details` object, for example the valid index range for `INVALID_INDEX`, or `missingScopes`.
-
-| Code                  | Meaning                                                                                                                      | Retryable |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `NOT_AUTHENTICATED`   | Not signed in, sign-in was cancelled, or the stored grant lacks required scopes. Call `authenticate`.                        | no        |
-| `AUTH_EXPIRED`        | The access token or refresh token expired or was revoked (`invalid_grant`). Sign in again.                                   | no        |
-| `INVALID_CREDENTIALS` | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are missing, or Google rejected them.                                            | no        |
-| `CONFIG_ERROR`        | Invalid configuration, a Google API not enabled in the Cloud project, the callback port in use, or an unreadable token file. | no        |
-| `INVALID_DOCUMENT_ID` | The document ID or URL is malformed. It is rejected before any request is sent.                                              | no        |
-| `DOCUMENT_NOT_FOUND`  | The document doesn't exist, or you don't have access to it.                                                                  | no        |
-| `PERMISSION_DENIED`   | You can't perform this operation on the document, or the granted scopes don't allow it.                                      | no        |
-| `INVALID_INDEX`       | An index or range lies outside the document body.                                                                            | no        |
-| `INVALID_ARGUMENT`    | Invalid tool arguments: wrong type or range, bad color or URL, not a Google Doc, and so on.                                  | no        |
-| `INVALID_REQUEST`     | Google rejected the request (HTTP 400). The message includes Google's explanation.                                           | no        |
-| `RATE_LIMITED`        | Google API rate limit or quota exceeded. Wait and retry.                                                                     | yes       |
-| `NETWORK_ERROR`       | Google APIs could not be reached, or the request timed out.                                                                  | yes       |
-| `GOOGLE_API_ERROR`    | Google returned an unexpected or server-side (5xx) error.                                                                    | yes       |
-| `INTERNAL_ERROR`      | An unexpected error inside the server. Details are only in the server logs.                                                  | no        |
-
-## Resources and Prompts
-
-**Resource template**
-
-| URI                                   | Content                                                                                                            |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `google-docs://document/{documentId}` | The document's current plain text (`text/plain`). Clients can attach a document as context without calling a tool. |
-
-**Prompts.** These are reusable instructions. The AI does the writing, and the server only provides Google Docs access.
-
-| Prompt                 | Purpose                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `summarize_document`   | Read a document and produce a summary.                                                                     |
-| `rewrite_document`     | Rewrite a document's content (for example in a different tone), applying the edits with the content tools. |
-| `format_document`      | Give a document a clean structure: headings, lists and consistent alignment.                               |
-| `create_meeting_notes` | Create a new meeting-notes document from a template.                                                       |
-
-## Understanding indexes
-
-Index-based tools (`insert_text`, `delete_text`, `format_text`, `set_paragraph_style`, `set_alignment`, `insert_page_break`, `insert_table`, `insert_link`, `create_bulleted_list`) use Google Docs indexes:
-
-- The document body **starts at index 1**. Index 0 is a section break.
-- Indexes are **UTF-16 code units**, the same as JavaScript string offsets. Most characters count as 1, but emoji and other astral-plane characters count as 2. Tables, images and other objects also take up index positions.
-- Ranges are half-open, `[startIndex, endIndex)`. Valid insertion indexes are `1 … bodyEndIndex - 1`. The final newline of the body can never be deleted.
-- **Every insert or delete shifts all indexes after it.** When you make several index-based edits, work **from the end of the document towards the beginning**, or re-read the document between edits.
-- Use `get_document` (the `structure` outline and `bodyEndIndex`) or `find_text` to get exact indexes. Don't guess them. `append_text` and `replace_text` don't need indexes at all.
-- Indexes are validated against the current document before anything is sent to Google (`INVALID_INDEX`). Writes use the document's `revisionId` as `targetRevisionId`. If a collaborator edits the document at the same moment, Google adjusts the indexes for you instead of applying them to the wrong text.
-
-## Search limitations
-
-Google Drive has two different search modes, and they behave differently:
-
-| Mode                 | Used by                                                              | Behaviour                                                                                                                                                                                                                                                       |
-| -------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Name search**      | `list_documents` (`search`), `search_documents` (`searchIn: "name"`) | Drive `name contains '…'`. Case-insensitive and matches the **file name only**. Drive matches from the start of words, so `Proposal` finds "FYP Proposal", but a fragment from the middle of a word may not match.                                              |
-| **Full-text search** | `search_documents` (`searchIn: "content"`)                           | Drive `fullText contains '…'`. Searches the indexed **content** (and name) of documents and matches whole words or phrases rather than arbitrary substrings. Results are ordered by relevance. Recently created or edited documents can take a while to appear. |
-| **Both**             | `search_documents` (`searchIn: "both"`)                              | Either condition matches.                                                                                                                                                                                                                                       |
-
-- Search results only include **Google Docs** that are **not in the trash**.
-- With `GOOGLE_DRIVE_SCOPE=drive.file`, Drive only returns documents created or opened by this app.
-- To locate text **inside** a known document, with exact indexes for editing, use `find_text`.
-
-## Security
-
-- **Least-privilege scopes.** The server requests `https://www.googleapis.com/auth/documents` plus one Drive scope. Set `GOOGLE_DRIVE_SCOPE=drive.file` to limit Drive operations (list, search, copy, trash) to files created or opened by this app. The default `drive` scope is only needed to discover and manage **all** your existing documents.
-- **Secure token storage.** Tokens live in a local JSON file created with mode `0600` in a `0700` directory. The file is written atomically, never sent anywhere except Google, and deleted by `sign_out` / `logout`, which also revoke the grant at Google.
-- **PKCE + state.** Sign-in uses the OAuth 2.0 authorization-code flow with PKCE (S256) and a random `state` value that is compared in constant time. Forged callbacks are rejected.
-- **Loopback-only redirect.** The redirect URI must be `http://127.0.0.1`, `localhost` or `[::1]` with an explicit port. The temporary callback server only listens on that address, only for the duration of the sign-in (at most 5 minutes), and shuts down afterwards.
-- **No secret logging.** Logs go to stderr only. Sensitive fields (`access_token`, `refresh_token`, `client_secret`, authorization codes, `Authorization` headers and similar) are redacted. Token patterns inside messages are scrubbed too. Stack traces of library errors are never logged.
-- **Safe error messages.** Tool errors carry a stable code and a human-readable message. They never include tokens, secrets, stack traces or file-system paths, and Google's messages are redacted before they are returned.
-- **Trash, never delete.** `delete_document` only moves Google Docs files to the Drive trash, and refuses other file types. Nothing is permanently deleted.
-- **Concurrent-edit safety.** Index-based writes are validated against the current document and sent with `targetRevisionId`.
-- **Input validation.** Every tool has a strict zod schema, and unknown arguments are rejected. Document IDs and URLs are checked against a strict pattern, which blocks path or query injection. Drive search input is escaped so it can't break out of the query. Link URLs must be `http`, `https` or `mailto`. Index ranges are checked before writing.
-- **No hard-coded credentials.** Client ID and secret come only from the environment or `.env`.
-
-## Testing
+With credentials in `<repo>/.env`, no `env` block is needed. To see every tool interactively, use the MCP Inspector:
 
 ```bash
-npm test                 # all unit tests (Google APIs are mocked; no credentials or network needed)
-npm run test:watch       # watch mode
+npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
-Unit tests replace the Google API clients and the OAuth client with fakes, and run the MCP tools through a real MCP client over an in-memory transport. Test runs point `GOOGLE_TOKEN_PATH` at a non-existent file, so they never touch your real tokens.
-
-**Optional integration tests against a real Google account.** Use a dedicated test account, because these tests create and modify real documents.
+## Development
 
 ```bash
-# 1. Sign the test account in and store its tokens in a separate file
-GOOGLE_TOKEN_PATH=/abs/path/test-account-tokens.json npm run auth
-
-# 2. Run the integration tests with that token file
-RUN_GOOGLE_INTEGRATION_TESTS=true \
-GOOGLE_INTEGRATION_TOKEN_PATH=/abs/path/test-account-tokens.json \
-npm run test:integration
+npm ci                  # install dependencies from the lockfile
+npm run dev             # run the server from source with automatic restarts
+npm test                # unit tests (Google APIs mocked) and the stdio integration test
+npm run typecheck       # type-check sources, tests and scripts
+npm run lint            # ESLint (strict, type-aware)
+npm run format          # Prettier
+npm run build           # compile to dist/ (standalone server)
+npm run package         # build the Claude Desktop extension: build/google-docs-mcp.mcpb
+npm run package:check   # verify the .mcpb: contents, secrets, and a real launch
+npm run validate:manifest  # validate manifest.json with the official mcpb CLI
 ```
 
-Without `RUN_GOOGLE_INTEGRATION_TESTS=true`, the integration tests are skipped. They also need `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (from the environment or `.env`). If `GOOGLE_INTEGRATION_TOKEN_PATH` is not set, they use the default token path. Every document they create is moved to the Drive trash afterwards.
+`npm run package` does the following:
 
-## Development scripts
+1. Compiles the server into `build/bundle` without source maps.
+2. Installs only the production dependencies from `package-lock.json` (`npm ci --omit=dev --ignore-scripts`).
+3. Validates `manifest.json` and packs the folder with Anthropic's official [`@anthropic-ai/mcpb`](https://github.com/anthropics/mcpb) packer.
 
-| Script                     | What it does                                                |
-| -------------------------- | ----------------------------------------------------------- |
-| `npm run build`            | Compile TypeScript to `dist/`.                              |
-| `npm run dev`              | Run the server from source with `tsx watch` (auto-restart). |
-| `npm start`                | Run the compiled server (`node dist/index.js`).             |
-| `npm run auth`             | Sign in with Google from the terminal (runs from source).   |
-| `npm run typecheck`        | Type-check sources and tests without emitting.              |
-| `npm run lint`             | Run ESLint (strict, type-aware rules).                      |
-| `npm run lint:fix`         | Run ESLint and fix what it can.                             |
-| `npm run format`           | Format the code with Prettier.                              |
-| `npm run format:check`     | Check formatting without writing.                           |
-| `npm test`                 | Run the unit tests with Vitest.                             |
-| `npm run test:watch`       | Run Vitest in watch mode.                                   |
-| `npm run test:integration` | Run the optional real-account integration tests.            |
+The result has no development dependencies, sources, tests or secrets, and needs nothing installed on the user's machine.
 
-## Troubleshooting
+`npm run package:check` does the following:
 
-| Problem                                                                                   | Cause and fix                                                                                                                                                                                                                                                                                                        |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`Error 400: redirect_uri_mismatch`**                                                    | The OAuth client is not a **Desktop app** client (Web clients need exact registered redirect URIs), or `GOOGLE_REDIRECT_URI` is not a loopback URL. Create a Desktop app client and keep the default `http://127.0.0.1:53682/oauth2callback`.                                                                        |
-| **`Error 403: access_denied`** / "has not completed the Google verification process"      | Your account is not a **test user** of an app in Testing status. Add it under **Google Auth Platform → Audience → Test users**. If you clicked **Cancel** on the consent screen, run the sign-in again.                                                                                                              |
-| **`AUTH_EXPIRED`** / `invalid_grant`                                                      | The refresh token expired or was revoked. In **Testing** status, refresh tokens expire after **7 days**. Changing your password or removing the app's access also revokes them. Run `npm run auth` (or the `authenticate` tool) again. Consider moving the app to **In production** to stop the weekly expiry.       |
-| **`CONFIG_ERROR`: "The Google Docs API or Google Drive API is not enabled"**              | Enable **both** APIs in **APIs & Services → Library** for the project that owns your OAuth client, wait a minute or two, and retry.                                                                                                                                                                                  |
-| **`CONFIG_ERROR`: "The OAuth callback port 53682 is already in use"**                     | Another process (or another sign-in) is using the port. Close it, or pick another port, for example `GOOGLE_REDIRECT_URI=http://127.0.0.1:53999/oauth2callback`. You don't need to change anything in Google Cloud.                                                                                                  |
-| **`INVALID_CREDENTIALS`**                                                                 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are not visible to the server, for example because the MCP client does not pass them, or Google rejected them. Put them in the client's `env` block or in `<repo>/.env`, and check for copy/paste errors.                                                                |
-| **`NOT_AUTHENTICATED` with `missingScopes`**                                              | The stored grant lacks a required scope, for example after switching `GOOGLE_DRIVE_SCOPE` from `drive.file` to `drive`. Sign in again and approve all requested permissions.                                                                                                                                         |
-| **Documents are missing or `DOCUMENT_NOT_FOUND` / `PERMISSION_DENIED` with `drive.file`** | With `GOOGLE_DRIVE_SCOPE=drive.file`, Drive only exposes files created or opened by this app, so listing, searching, copying or trashing other documents fails. Use `GOOGLE_DRIVE_SCOPE=drive` and sign in again, or accept the restriction. Also check that the document is shared with your account.               |
-| **`INVALID_INDEX`**                                                                       | The index is outside `1 … bodyEndIndex - 1`, or the document changed since the indexes were computed. Re-read with `get_document` or `find_text`, and apply multiple edits from the end of the document backwards.                                                                                                   |
-| **`RATE_LIMITED`**                                                                        | Google API quota exceeded (per-minute limits). Read requests are retried automatically with backoff; wait a moment before retrying writes. You can see quotas under **APIs & Services → Quotas**.                                                                                                                    |
-| **The client shows "invalid JSON" / the connection drops**                                | stdout is reserved for MCP protocol messages. Don't add `console.log` or anything else that writes to stdout. The server writes all logs (JSON lines) and CLI output to **stderr**. Set `LOG_LEVEL=debug` and check your client's MCP log, for example `~/Library/Logs/Claude/mcp*.log` for Claude Desktop on macOS. |
-| **Server doesn't start**                                                                  | Check `node --version` (22.12 or newer is required), that `npm run build` produced `dist/index.js`, and that the path in your client config is absolute. Run `node /abs/path/to/google-docs-mcp/dist/index.js status` in a terminal to see configuration errors.                                                     |
-| **The sign-in link doesn't work**                                                         | The `authUrl` must be opened on the machine that runs the server, because Google redirects to `127.0.0.1` there. It also expires after 5 minutes: call `authenticate` again.                                                                                                                                         |
+1. Unpacks the bundle into a temporary folder.
+2. Validates the manifest.
+3. Checks that every runtime dependency is present, and rejects source files, source maps, development dependencies, `.env` files, token files and anything that looks like a secret.
+4. Starts the bundled server outside the repository, with the same launch configuration Claude Desktop derives from `manifest.json`.
+5. Checks the tools, prompts, resources and sign-in state over MCP.
 
-## Project structure
+**Optional real-account tests.** These create, edit and trash real documents, so use a test account:
+
+```bash
+RUN_GOOGLE_INTEGRATION_TESTS=true npm run test:integration
+```
+
+**Releases.** Bump `version` in both `package.json` and `manifest.json` (a unit test enforces that they match), update `CHANGELOG.md`, then push a `vX.Y.Z` tag. The [release workflow](.github/workflows/release.yml) runs every check, builds and verifies the `.mcpb`, and attaches it to the GitHub release. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Architecture
+
+```text
+Claude Desktop
+    │  installs google-docs-mcp.mcpb, stores the settings (client secret as a sensitive value)
+    │  and launches: node ${__dirname}/dist/index.js with the settings as environment variables
+    ▼
+MCP server (stdio, @modelcontextprotocol/server v2)   ← also usable standalone: node dist/index.js
+    │
+    ├── Tools / Resource / Prompts        src/tools, src/resources, src/prompts
+    │        ▼
+    ├── Services (validation, business logic)   src/services
+    │        ▼
+    ├── Google API clients                src/google  (@googleapis/docs, @googleapis/drive)
+    │        ▲
+    └── Google OAuth 2.0                  src/auth
+             │  authorization code + PKCE, loopback redirect on 127.0.0.1
+             │  tokens in a local 0600 file, refreshed automatically
+             ▼
+      Google Docs API  ·  Google Drive API
+```
 
 ```text
 google-docs-mcp/
-├── src/
-│   ├── index.ts              # CLI entry point: stdio server, `auth`, `status`, `logout`
-│   ├── server.ts             # Builds the McpServer and registers tools, resources, prompts
-│   ├── config/config.ts      # Environment configuration and validation
-│   ├── auth/
-│   │   ├── google-auth.ts    # OAuth 2.0 (PKCE, loopback flow, refresh, sign-out)
-│   │   └── token-manager.ts  # Secure token file storage
-│   ├── google/
-│   │   ├── docs-client.ts    # Google Docs API wrapper
-│   │   ├── drive-client.ts   # Google Drive API wrapper
-│   │   ├── document-parser.ts # Index-accurate document parsing
-│   │   └── retry.ts          # Retry policy for idempotent requests
-│   ├── services/             # Business logic (documents, content, formatting, structure, search)
-│   ├── tools/                # MCP tool definitions (auth, documents, content, formatting, structure, search)
-│   ├── resources/            # MCP resources (google-docs://document/{documentId})
-│   ├── prompts/              # MCP prompts
-│   ├── schemas/              # Shared zod schemas
-│   ├── types/                # Shared TypeScript types
-│   └── utils/                # Errors, validation, logging, URLs
-├── tests/
-│   ├── unit/                 # Unit tests (mocked Google APIs)
-│   ├── integration/          # Optional real-account tests
-│   └── helpers/              # Fakes and the in-memory MCP test harness
-├── .env.example
-├── eslint.config.js
-├── prettier.config.js
-├── tsconfig.json
-├── vitest.config.ts
-├── package.json
-├── LICENSE
-└── README.md
+├── manifest.json          # Claude Desktop extension manifest (MCPB 0.3)
+├── assets/icon.png        # Extension icon
+├── src/                   # Server source (TypeScript)
+├── scripts/               # package-mcpb.ts, verify-mcpb.ts
+├── tests/                 # Unit and integration tests
+└── .github/workflows/     # CI and release
 ```
+
+## Security
+
+- **No secrets in the code or the package.** The OAuth Client ID and secret come from the extension settings, where Claude Desktop stores the secret as a sensitive value, or from environment variables in standalone mode. `npm run package:check` fails if a `.env`, token or credentials file, or a token-like string, ends up in the bundle.
+- **OAuth 2.0 done properly.**
+  - Sign-in uses the authorization-code flow with PKCE (S256) and a random `state` that is checked in constant time.
+  - The redirect only goes to a loopback address.
+  - The temporary callback server exists only during sign-in (at most 5 minutes).
+- **Token storage.**
+  - Refresh and access tokens are created at runtime, and MCPB offers no host storage for runtime-generated secrets. So they are stored in a local file (`tokens.json`) with mode `0600` inside a `0700` folder, written atomically.
+  - Tokens are only sent to Google, never returned by any tool, and are bound to the OAuth client that issued them.
+  - `sign_out` revokes the grant at Google and deletes the file.
+- **No token logging.** Logs go to stderr only; stdout is reserved for MCP. Tokens, client secrets, authorization codes and `Authorization` headers are redacted, tool arguments (which may contain document content) are never logged, and library stack traces are never logged or returned.
+- **Safe errors.** Tool errors carry a stable code and a readable, actionable message without secrets, stack traces or file paths.
+- **Input validation.** Every tool has a strict schema that rejects unknown arguments. Document IDs and URLs must match a strict pattern, positions are checked against the live document before writing, link URLs must be `http`, `https` or `mailto`, and Drive search input is escaped.
+- **Safe edits.** `delete_document` only moves Google Docs files to the trash. `delete_text` can verify the text it is about to delete. Writes use `targetRevisionId`, so concurrent edits by collaborators don't shift positions onto the wrong text.
+- **Settings isolation.** The extension ignores `.env` files, so a stray file can't change its configuration. An invalid configuration doesn't crash the server: tools report exactly what to fix.
+- **Dependencies.** Only five runtime dependencies (the MCP SDK, Google's official API clients and auth library, and zod). The bundle is installed from the lockfile with install scripts disabled, and `npm audit` reports no known vulnerabilities at the time of release.
 
 ## License
 

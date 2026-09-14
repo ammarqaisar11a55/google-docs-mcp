@@ -1,0 +1,171 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
+  "name": "google-docs-mcp",
+  "display_name": "Google Docs for Claude",
+  "version": "1.1.0",
+  "description": "Create, read, edit, format and search your Google Docs from Claude, with secure Google sign-in.",
+  "long_description": "Google Docs for Claude connects Claude Desktop to the Google Docs in your Google Drive through the Google Docs and Google Drive APIs. Claude can create documents, read them, append, insert, replace and delete text, apply headings, formatting, alignment, lists, links, tables and page breaks, and find documents by name or content. Deleting a document only moves it to the Drive trash.\n\n**One-time setup:** in Google Cloud Console, enable the Google Docs API and Google Drive API and create an OAuth client of type *Desktop app*. Enter its Client ID and Client secret in this extension's settings, then ask Claude to \"sign in to Google\" and approve access in your browser.\n\nYour Google tokens stay on your computer and are only sent to Google. This extension is not affiliated with or endorsed by Google.",
+  "author": {
+    "name": "Muhammad Ammar Qaisar",
+    "url": "https://github.com/ammarqaisar11a55"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ammarqaisar11a55/google-docs-mcp.git"
+  },
+  "homepage": "https://github.com/ammarqaisar11a55/google-docs-mcp",
+  "documentation": "https://github.com/ammarqaisar11a55/google-docs-mcp#readme",
+  "support": "https://github.com/ammarqaisar11a55/google-docs-mcp/issues",
+  "icon": "assets/icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "${user_config.google_client_id}",
+        "GOOGLE_CLIENT_SECRET": "${user_config.google_client_secret}",
+        "GOOGLE_DRIVE_FILE_ONLY": "${user_config.limit_drive_access}",
+        "GOOGLE_REDIRECT_URI": "http://127.0.0.1:${user_config.oauth_callback_port}/oauth2callback",
+        "GOOGLE_DOCS_MCP_DEBUG": "${user_config.debug_logging}",
+        "GOOGLE_DOCS_MCP_LOAD_DOTENV": "false"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "get_auth_status",
+      "description": "Check whether the extension is signed in to Google with the required permissions."
+    },
+    {
+      "name": "authenticate",
+      "description": "Start Google sign-in and get the link to approve access."
+    },
+    {
+      "name": "sign_out",
+      "description": "Revoke Google access and delete the locally stored tokens."
+    },
+    {
+      "name": "create_document",
+      "description": "Create a new Google Doc, optionally with initial text."
+    },
+    {
+      "name": "get_document",
+      "description": "Read a Google Doc's text and structure, including exact positions."
+    },
+    {
+      "name": "list_documents",
+      "description": "List your Google Docs, most recently modified first."
+    },
+    {
+      "name": "delete_document",
+      "description": "Move a Google Doc to the Google Drive trash."
+    },
+    {
+      "name": "copy_document",
+      "description": "Copy a Google Doc under a new title."
+    },
+    {
+      "name": "append_text",
+      "description": "Append text to the end of a Google Doc."
+    },
+    {
+      "name": "insert_text",
+      "description": "Insert text at a specific position in a Google Doc."
+    },
+    {
+      "name": "replace_text",
+      "description": "Replace every occurrence of a phrase in a Google Doc."
+    },
+    {
+      "name": "delete_text",
+      "description": "Delete a range of text, optionally checking its current content first."
+    },
+    {
+      "name": "format_text",
+      "description": "Apply bold, italic, underline, strikethrough, font, size or colors to text."
+    },
+    {
+      "name": "set_paragraph_style",
+      "description": "Apply Title, Subtitle, Heading 1-6 or Normal text styles to paragraphs."
+    },
+    {
+      "name": "set_alignment",
+      "description": "Align paragraphs to the start, center or end, or justify them."
+    },
+    {
+      "name": "insert_page_break",
+      "description": "Insert a page break at a specific position."
+    },
+    {
+      "name": "insert_table",
+      "description": "Insert an empty table with the given rows and columns."
+    },
+    {
+      "name": "insert_link",
+      "description": "Turn existing text into an http, https or mailto link."
+    },
+    {
+      "name": "create_bulleted_list",
+      "description": "Turn paragraphs into a bulleted, numbered or checkbox list."
+    },
+    {
+      "name": "search_documents",
+      "description": "Search your Google Docs by name and/or content."
+    },
+    {
+      "name": "find_text",
+      "description": "Find a phrase in a Google Doc and return its exact positions."
+    }
+  ],
+  "prompts_generated": true,
+  "keywords": ["google docs", "google drive", "documents", "writing", "productivity", "mcp"],
+  "license": "MIT",
+  "privacy_policies": ["https://policies.google.com/privacy"],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  },
+  "user_config": {
+    "google_client_id": {
+      "type": "string",
+      "title": "Google OAuth Client ID",
+      "description": "Client ID of your Google Cloud OAuth client (type \"Desktop app\"), ending in .apps.googleusercontent.com. See the extension's README for the one-time setup.",
+      "required": true
+    },
+    "google_client_secret": {
+      "type": "string",
+      "title": "Google OAuth Client secret",
+      "description": "Client secret of the same OAuth client. Stored securely by Claude Desktop.",
+      "sensitive": true,
+      "required": true
+    },
+    "limit_drive_access": {
+      "type": "boolean",
+      "title": "Limit Drive access to this extension's files",
+      "description": "Least privilege: only documents created or opened by this extension are visible to Drive operations (list, search, copy, trash). Leave off to work with all your existing Google Docs. Sign in again after changing this.",
+      "default": false,
+      "required": false
+    },
+    "oauth_callback_port": {
+      "type": "number",
+      "title": "Sign-in callback port",
+      "description": "Local port (on 127.0.0.1) that receives the Google sign-in redirect. Change it only if another program uses this port.",
+      "default": 53682,
+      "min": 1024,
+      "max": 65535,
+      "required": false
+    },
+    "debug_logging": {
+      "type": "boolean",
+      "title": "Debug logging",
+      "description": "Write detailed diagnostic logs (secrets are always redacted). Useful when reporting a problem.",
+      "default": false,
+      "required": false
+    }
+  }
+}
