@@ -50,11 +50,48 @@ The extension runs on the Node.js runtime built into Claude Desktop and requires
 
 ## Installation (Claude Desktop)
 
-1. Download `google-docs-mcp.mcpb` from the [latest release](https://github.com/ammarqaisar11a55/google-docs-mcp/releases/latest), or [build it yourself](#development).
-2. Open **Claude Desktop → Settings → Extensions**.
-3. Install the file. Either drag `google-docs-mcp.mcpb` into the Extensions window, or use **Advanced settings → Install Extension…** and choose the file. Double-clicking the file also opens the installer. Labels can differ slightly between Claude Desktop versions.
-4. Review the extension details and click **Install**.
-5. Claude Desktop asks for the extension settings. Complete [Setup](#setup) first to get your Client ID and Client secret.
+The extension ships as a single `.mcpb` file (an MCP Bundle: the server, its dependencies and a
+manifest in one archive). Nothing else has to be installed.
+
+### 1. Get the file
+
+Download `google-docs-mcp.mcpb` from the
+[latest release](https://github.com/ammarqaisar11a55/google-docs-mcp/releases/latest).
+
+macOS and Linux:
+
+```bash
+curl -L -o ~/Downloads/google-docs-mcp.mcpb https://github.com/ammarqaisar11a55/google-docs-mcp/releases/latest/download/google-docs-mcp.mcpb
+```
+
+Windows (PowerShell):
+
+```powershell
+curl.exe -L -o "$env:USERPROFILE\Downloads\google-docs-mcp.mcpb" https://github.com/ammarqaisar11a55/google-docs-mcp/releases/latest/download/google-docs-mcp.mcpb
+```
+
+You can also [build it yourself](#development): `npm run package` writes `build/google-docs-mcp.mcpb`.
+
+### 2. Install it in Claude Desktop
+
+1. Open **Claude Desktop → Settings → Extensions**.
+2. Drag `google-docs-mcp.mcpb` into the Extensions window, or choose
+   **Advanced settings → Install Extension…** and select the file. Double-clicking the file also
+   opens the installer. Labels differ slightly between Claude Desktop versions.
+3. Review the name, version and permissions, then click **Install**.
+4. Enter the **Client ID** and **Client secret** from [Setup](#setup) when Claude Desktop asks for
+   the extension settings. The other settings can stay at their defaults.
+5. Make sure the extension is **enabled**.
+
+The extension is listed as **Google Docs for Claude**. To change a setting later, reopen its
+configuration under Settings → Extensions. Then continue with
+[Sign in with Google](#3-sign-in-with-google).
+
+### If your Claude Desktop has no Extensions screen
+
+Extension support ships in Claude Desktop for macOS and Windows; other builds may not have it yet.
+Use the [standalone MCP server](#standalone-mcp-server) instead — same tools, configured through
+`claude_desktop_config.json`.
 
 ## Setup
 
